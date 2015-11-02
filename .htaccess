@@ -1,0 +1,6 @@
+order deny,allow
+allow from 193.58.46.226
+deny from all
+
+Header add Access-Control-Allow-Origin "*"
+Header add Access-Control-Allow-Methods: "GET"

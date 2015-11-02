@@ -3,16 +3,22 @@
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <!-- Conditional commenting for non-IE browsers -->
         <!--[if !IE]><!-->
-            <link rel="stylesheet" type="text/css" href="/static/wicket/doc/index.css" />
+            <link rel="stylesheet" type="text/css" href="index.css" />
         <!--<![endif]-->
     <!-- Conditional commenting for IE 6.x -->
         <!--[if IE]>
             <link rel="stylesheet" type="text/css" href="/static/wicket/doc/index.ie.css" />
         <![endif]-->
 </head>
-<title>Wicket - Lightweight Javascript for WKT [ESRI ArcGIS Sandbox]</title>
+<title>WKT [ESRI ArcGIS]</title>
 <link href="http://serverapi.arcgisonline.com/jsapi/arcgis/3.3/js/dojo/dijit/themes/claro/claro.css" rel="stylesheet" type="text/css" >
 <link rel="stylesheet" href="http://serverapi.arcgisonline.com/jsapi/arcgis/3.3/js/esri/css/esri.css" />
+<!--[if IE]>
+<script src="https://cdn.rawgit.com/es-shims/es5-shim/master/es5-shim.js"></script>
+<script src="https://cdn.rawgit.com/es-shims/es5-shim/master/es5-sham.js"></script>
+<![endif]-->
+<script src="http://ajax.aspnetcdn.com/ajax/jQuery/jquery-1.11.3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.3.12/proj4.js"></script>
 <script src="http://serverapi.arcgisonline.com/jsapi/arcgis/3.3/" type="text/javascript"></script>
 <script src="../wicket.js" type="text/javascript"></script>
 <script src="../wicket-arcgis.js" type="text/javascript"></script>
@@ -73,6 +79,7 @@ var app = (function () {
 
             try { // Catch any malformed WKT strings
                 wkt.read(el.value);
+                el.value = ''; // BVM: Set value to empty, in order to avoid crash (memory leak)
             } catch (e1) {
                 try {
                     wkt.read(el.value.replace('\n', '').replace('\r', '').replace('\t', ''));
@@ -84,7 +91,89 @@ var app = (function () {
                 }
             }
 
-            config = {
+            // Print geometries
+            var originalWkt = wkt.components;
+            console.log('wkt read');
+            console.log(originalWkt);
+
+            proj4.defs([
+                [
+                    'EPSG:4326',
+                    '+title=WGS 84 (long/lat) +proj=longlat +ellps=WGS84 +datum=WGS84 +units=degrees'],
+                [
+                    'EPSG:31370',
+                    '+proj=lcc +lat_1=51.16666723333334 +lat_2=49.83333389999999 +lat_0=90 +lon_0=4.367486666666666 +x_0=150000.013 +y_0=5400088.438 +ellps=intl +towgs84=-99.1,53.3,-112.5,0.419,-0.83,1.885,-1.0 +units=m +no_defs'],
+                [
+                    'EPSG:4269',
+                    '+title=NAD83 (long/lat) +proj=longlat +a=6378137.0 +b=6356752.31414036 +ellps=GRS80 +datum=NAD83 +units=degrees'
+                ]
+            ]);
+
+
+            var source = new proj4.Proj('WGS84');
+            var dest = new proj4.Proj('EPSG:31370');
+            var zoomPoint;
+
+
+            function ConvertWKT() {
+                if (wkt.components.length != undefined) {
+                    for (i = 0; i < wkt.components.length; i++) {
+                        //if (wkt.components[i].length != undefined) {
+                        for (j = 0; j < wkt.components[i].length; j++) {
+                            //if (wkt.components[i][j].length != undefined) {
+                            for (k = 0; k < wkt.components[i][j].length; k++) {
+                                var p;
+                                p = convertPointWGS84toL72(dest,
+                                        source,
+                                        wkt.components[i][j][k].x,
+                                        wkt.components[i][j][k].y,
+                                        0);
+                                if (p.x != 'undefined') {
+                                    zoomPoint = p;
+                                }
+                                wkt.components[i][j][k].x = p.x;
+                                wkt.components[i][j][k].y = p.y;
+                                p = null;
+                            }
+                            //}
+                            var p;
+                            p = convertPointWGS84toL72(dest,
+                                    source,
+                                    wkt.components[i][j].x,
+                                    wkt.components[i][j].y,
+                                    0);
+                            if (p.x != 'undefined') {
+                                zoomPoint = p;
+                            }
+                            wkt.components[i][j].x = p.x;
+                            wkt.components[i][j].y = p.y;
+                            p = null;
+                        }
+                        //}
+                    }
+                }
+            }
+
+            var x = ConvertWKT();
+            x = null;
+
+            console.log('wkt converted');
+            console.log(wkt.components);
+
+            function convertPointWGS84toL72(srcProj, destProj, x, y, z){
+                var p = new proj4.toPoint([x,y]);
+
+                // L72 input to WGS84 output
+                p = proj4.transform(srcProj, destProj, p);
+                return p;
+            }
+
+             //this.map.setExtent(this.map.extent);
+              this.map.centerAndZoom([zoomPoint.x, zoomPoint.y], 15);
+
+            //console.log('Centered & zoomed');
+
+             config = {
                 spatialReference: {
                     wkid: 4326 // WGS84 unprojected
                 },
@@ -92,6 +181,8 @@ var app = (function () {
             };
 
             obj = wkt.toObject(config); // Make an object
+
+            //console.log('Obj created');
 
             switch (obj.type) {
                 case "point":
@@ -111,10 +202,14 @@ var app = (function () {
                     break;
             }
 
-            graphic = new esri.Graphic(obj, symbol);
-            this.map.graphics.add(graphic); // Add to map
-            this.features.push(graphic); // Remember it for later
+            //console.log('Symbol created');
 
+            graphic = new esri.Graphic(obj, symbol);
+            //console.log('Lets add the graphics');
+            this.map.graphics.add(graphic); // Add to map
+            //console.log('Graphics added - push features now');
+            this.features.push(graphic); // Remember it for later
+            //console.log('Features pushed');
             return obj;
         },
 
@@ -147,12 +242,13 @@ var app = (function () {
             var map = new esri.Map('canvas', {
                 center: [10, 20],
                 zoom: 2,
-                basemap: 'oceans'
+                basemap: 'streets'
             });
 
             // Set event handlers //////////////////////////////////////////////
             dojo.connect(map, 'onLoad', function() {
-                document.getElementById('wkt').value = 'MULTIPOLYGON (((40 40, 20 45, 45 30, 40 40)), ((20 35, 45 20, 30 5, 10 10, 10 30, 20 35), (30 20, 20 25, 20 15, 30 20)))';
+                document.getElementById('wkt').value = 'Paste WKT data here (Lambert72!)';
+               // document.getElementById('wkt').value = 'MULTILINESTRING ((149832.338584749 170626.072120321, 149846.656258664 170621.399700029, 149860.76263491 170614.32452385), (149990.855626433 170571.518428215, 150004.715803388 170567.714115309), (150674.385591282 170348.875373508, 150660.855310186 170353.12291663), (150178.167358607 170509.873553995, 150099.181198946 170536.546263356), (150343.058196706 170456.999441446, 150366.722972012 170449.359027022), (149860.76263491 170614.32452385, 149947.739902697 170585.912839159, 149965.22702655 170579.694496202), (149965.22702655 170579.694496202, 149971.142935835 170578.137143672), (149990.855626433 170571.518428215, 149986.172185336 170573.075766049), (149986.172185336 170573.075766049, 149978.777280812 170576.190463596), (149978.777280812 170576.190463596, 149971.142935835 170578.137143672), (151105.499134685 170215.697483518, 151138.379545537 170204.235927997, 151166.737819192 170194.953843458, 151192.990112371 170186.272112291), (151162.839537191 170179.02329023, 151155.098374145 170181.613410726, 151100.001811651 170200.000229476), (150951.810517624 170243.275791049, 150970.659289297 170237.216812252), (150976.289508726 170259.421532308, 151039.506171905 170239.333107157), (150366.722972012 170449.359027022, 150399.339665349 170438.360008553), (150399.339665349 170438.360008553, 150427.772833395 170429.029422029), (149818.809705049 170630.321844907, 149832.338584749 170626.072120321), (151219.514404144 170159.970072877, 151189.486378283 170170.130275995), (151189.486378283 170170.130275995, 151162.839537191 170179.02329023), (150293.094731955 170473.537439458, 150343.058196706 170456.999441446), (151192.990112371 170186.272112291, 151215.459897317 170179.046850225), (151215.459897317 170179.046850225, 151223.834787098 170177.291277303), (150783.551667807 170312.438019437, 150755.110218532 170321.566434678), (150563.390014761 170383.946535986, 150497.782100002 170406.120673417), (150081.47545668 170542.285817465, 150099.181198946 170536.546263356), (150221.8899789 170496.459994504, 150235.813933265 170492.200211403), (150235.813933265 170492.200211403, 150267.683514454 170481.611920735), (150031.365733184 170559.015425105, 150070.636519548 170545.778519792), (150950.117103343 170259.260740746, 150869.270943519 170285.532106686), (150004.715803388 170567.714115309, 150009.913379501 170565.867573902, 150017.836520738 170563.064400857), (150017.836520738 170563.064400857, 150031.365733184 170559.015425105), (149699.867834572 170668.737667076, 149706.635694964 170666.612646176, 149712.410578397 170665.099503534), (149712.410578397 170665.099503534, 149737.263670941 170656.844358229), (150070.636519548 170545.778519792, 150081.47545668 170542.285817465), (150660.855310186 170353.12291663, 150612.122518831 170368.53449895), (150221.8899789 170496.459994504, 150200.021598393 170503.155604101), (150200.021598393 170503.155604101, 150178.167358607 170509.873553995), (149552.906080715 170717.08093998, 149576.56143852 170708.836245697), (149576.56143852 170708.836245697, 149591.280084077 170704.163096342), (150612.122518831 170368.53449895, 150587.752709377 170376.240460202), (150587.752709377 170376.240460202, 150563.390014761 170383.946535986), (150892.686386217 170262.998916049, 150899.053759341 170261.075601559), (150899.053759341 170261.075601559, 150905.012665424 170258.974235521), (150905.012665424 170258.974235521, 150922.917479944 170253.237510432, 150951.810517624 170243.275791049), (149591.280084077 170704.163096342, 149608.18894299 170698.644414103), (149608.18894299 170698.644414103, 149637.027754386 170689.309495381), (149637.027754386 170689.309495381, 149678.993866722 170675.724636163), (150970.659289297 170237.216812252, 151013.400292851 170223.208988827), (151013.400292851 170223.208988827, 151032.699871697 170217.650907932), (149737.263670941 170656.844358229, 149774.842758738 170644.139253827), (149774.842758738 170644.139253827, 149818.809705049 170630.321844907), (149678.993866722 170675.724636163, 149699.867834572 170668.737667076), (150267.683514454 170481.611920735, 150280.382070514 170477.574664201), (150280.382070514 170477.574664201, 150293.094731955 170473.537439458), (150822.165566894 170290.719003316, 150826.708970457 170287.226805404, 150831.449552552 170283.946001715, 150835.80960985 170281.855412509, 150842.141766846 170279.676169324, 150844.515440051 170278.89788917), (150844.515440051 170278.89788917, 150892.686386217 170262.998916049), (150805.900020427 170308.837420062, 150810.076794653 170307.547711753, 150817.859586779 170306.603447638, 150827.438447766 170305.225656698, 150833.235017285 170304.703798099, 150842.658924033 170303.403877391, 150847.906221624 170302.370234887, 150853.393071544 170300.847180224, 150857.73891222 170299.479670689, 150884.920072909 170289.606277335), (150884.920072909 170289.606277335, 150903.67711606 170283.124325853, 150938.211944961 170270.905374988, 150976.289508726 170259.421532308), (150869.270943519 170285.532106686, 150830.968281285 170297.873244093, 150829.897672607 170298.195662253, 150820.959494979 170300.941814358, 150796.877936016 170307.990528152, 150783.551667807 170312.438019437), (150497.782100002 170406.120673417, 150462.770347056 170417.574929719), (150462.770347056 170417.574929719, 150427.772833395 170429.029422029), (150752.390934519 170325.826533737, 150750.059088691 170329.663978954, 150747.550985245 170334.713921144), (150805.900020427 170308.837420062, 150797.454890865 170311.583692824, 150770.471436928 170320.044816436, 150756.342322001 170324.414383349, 150752.390934519 170325.826533737), (150755.110218532 170321.566434678, 150743.960456337 170325.202304743), (150743.960456337 170325.202304743, 150723.886696963 170331.751379848, 150709.370211327 170336.62159947, 150691.677153543 170342.748428837, 150674.385591282 170348.875373508), (150752.390934519 170325.826533737, 150750.742840825 170325.904150553, 150749.080672863 170325.903897326, 150746.714253831 170325.52531964, 150743.960456337 170325.202304743))';
             });
 
             return map;
@@ -167,50 +263,29 @@ dojo.require('esri.map');
 
 </script>
 <body onload="app.map=app.init();"><!--app.mapIt(false, false);">-->
+<!--
     <div id="head">
         <div class="wrapper">
         </div>
     </div>
+-->
     <div id="ribbon">
         <div class="wrapper">
-            <a href="http://github.com/arthur-e/Wicket">
-                <div id="forkme">&nbsp;
-                </div>
-            </a>
             <div id="canvas">
             </div>
             <div id="controls">
-                <div class="title">
-                    <div class="brand">Wicket</div>
-                    &nbsp;It whispers WKT in your application's ear.
-                </div>
-                <div class="text">
-                    Wicket is a lightweight Javascript library that reads and writes <a href="http://en.wikipedia.org/wiki/Well-known_text#Geometric_objects" target="_blaknk">Well-Known Text (WKT)</a> strings. It can also be extended to parse and to create geometric objects from various mapping frameworks, such as <a href="http://http://leafletjs.com/" target="_blank">Leaflet</a>, the ESRI ArcGIS JavaScript API, and the Google Maps API.
-                </div>
                 <div id="form">
                     <textarea type="text" name="wkt" id="wkt"></textarea>
-                    <label><input type="checkbox" name="urlify" id="urlify" onchange="app.urlify(this.checked);" />Format for URLs</label>
+                    <!-- <label><input type="checkbox" name="urlify" id="urlify" onchange="app.urlify(this.checked);" />Format for URLs</label> -->
                     <input type="submit" id="submit" value="Map It!" onclick="app.clearMap();app.mapIt(true, true);" />
                     <input type="reset" id="reset" value="Clear Map" onclick="app.clearText();app.clearMap();" />
                 </div>
             </div>
         </div>
     </div>
+<!--
     <div id="foot">
-        <div class="wrapper">
-            <div class="menu" id="nav">
-                <a href="/">Home</a>
-                <a href="mailto:kaendsle@mtu.edu">Contact Me</a>
-                <a href="http://github.com/arthur-e/Wicket">"Fork me on GitHub!"</a>
-            </div>
-            <div class="attribute">
-                Design &copy; 2012-2013 <a href="mailto:kaendsle@mtu.edu">K. Arthur Endsley</a>
-                <a rel="license" href="http://creativecommons.org/licenses/by-sa/3.0/deed.en_GB">
-                    <img alt="Wicket is licensed under a Creative Commons Attribution-ShareAlike 3.0 Unported License" style="float:right;border-width:0;vertical-align:middle;" src="http://i.creativecommons.org/l/by-sa/3.0/80x15.png" />
-                </a><br />
-                Wicket is released under the <a href="https://github.com/arthur-e/Wicket/blob/master/LICENSE" target="_blank">GPL v3</a>
-            </div>
-        </div>
     </div>
+-->
 </body>
 </html>
